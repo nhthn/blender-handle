@@ -325,6 +325,7 @@ class MakeHandle(bpy.types.Operator):
 
         make_handle(mesh, face_1, vertex_1, face_2, vertex_2, 10, 30.0)
         bmesh.update_edit_mesh(edit_mode_mesh)
+        GLOBAL_ADDON_STATE.reset()
         return {"FINISHED"}
 
 
