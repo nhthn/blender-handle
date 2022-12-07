@@ -75,7 +75,7 @@ def convert_polygon_to_polar(vertices, x_axis, y_axis):
         sin_angle = vertex.dot(y_axis)
         radius = vertex.length
         angle = math.atan2(sin_angle, cos_angle)
-        if angle < last_angle:
+        while angle < last_angle:
             angle += 2 * math.pi
         result.append((radius, angle))
         last_angle = angle
@@ -280,5 +280,33 @@ def unregister():
     bpy.utils.unregister_class(MakeHandle)
 
 
+def main():
+    bpy.ops.object.select_all(action="SELECT")
+    bpy.ops.object.delete(use_global=False)
+
+    bpy.ops.mesh.primitive_cube_add()
+
+    bpy_mesh = bpy.context.object.data
+    mesh = bmesh.new()
+    mesh.from_mesh(bpy_mesh)
+
+    faces = mesh.faces[:]
+    face_1 = faces[0]
+    face_2 = faces[1]
+    vertex_1 = faces[0].verts[0]
+    vertex_2 = faces[1].verts[2]
+
+    make_handle(
+        mesh, face_1, vertex_1, face_2, vertex_2, 10, 30.0
+    )
+
+    mesh.to_mesh(bpy_mesh)
+    mesh.free()
+
+
 if __name__ == "__main__":
-    register()
+    try:
+        main()
+    except Exception:
+        traceback.print_exc()
+        sys.exit(1)
