@@ -11,7 +11,7 @@ import bpy
 bl_info = {
     "name": "Make Handle",
     "blender": (3, 3, 1),
-    "category": "Object",
+    "category": "Mesh",
 }
 
 
@@ -141,10 +141,10 @@ def make_handle(mesh, face_1, vertex_1, face_2, vertex_2, num_segments, weight, 
     original_vertices_1 = rotate_list(original_vertices_1, shift_1)
 
     original_vertices_2 = face_2.verts[:]
-    shift_2 = original_vertices_2.index(vertex_2)
-    original_vertices_2 = rotate_list(original_vertices_2, shift_2)
     # Reverse the second polygon. Trust me, it looks weird if you don't do this.
     original_vertices_2 = original_vertices_2[::-1]
+    shift_2 = original_vertices_2.index(vertex_2)
+    original_vertices_2 = rotate_list(original_vertices_2, shift_2)
 
     # Translate the two polygons so their centroids are the origin.
     points_1 = [vertex.co - centroid_1 for vertex in original_vertices_1]
@@ -243,7 +243,8 @@ def get_active_vertex(mesh):
 class AddonState:
 
     def __init__(self):
-        self.reset()
+        self.edit_mode_mesh = None
+        self.faces = None
 
     def reset(self):
         self.edit_mode_mesh = None
@@ -272,7 +273,6 @@ class SelectFacesForHandle(bpy.types.Operator):
         GLOBAL_ADDON_STATE.edit_mode_mesh = edit_mode_mesh
         GLOBAL_ADDON_STATE.faces = faces
         return {"FINISHED"}
-
 
 
 class MakeHandle(bpy.types.Operator):
