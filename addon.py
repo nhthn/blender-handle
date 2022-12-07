@@ -105,10 +105,10 @@ def get_handle_centroid(centroid_1, normal_1, centroid_2, normal_2, t, weight):
     intermediate face parametrized by the variable 0 <= t <= 1. The weight parameter
     controls how much the handle sticks out."""
     return (
-            centroid_1 * hermite_1(t)
-            + centroid_2 * hermite_1(1 - t)
-            + weight * normal_1 * hermite_2(t)
-            - weight * normal_2 * hermite_2(1 - t)
+        centroid_1 * hermite_1(t)
+        + centroid_2 * hermite_1(1 - t)
+        + weight * normal_1 * hermite_2(t)
+        - weight * normal_2 * hermite_2(1 - t)
     )
 
 
@@ -117,10 +117,10 @@ def get_handle_normal(centroid_1, normal_1, centroid_2, normal_2, t, weight):
     centroid. This is accomplished by taking the derivative of get_handle_centroid
     and then normalizing the resulting 3D vector."""
     return (
-            centroid_1 * hermite_1_derivative(t)
-            + centroid_2 * -hermite_1_derivative(1 - t)
-            + weight * normal_1 * hermite_2_derivative(t)
-            - weight * normal_2 * -hermite_2_derivative(1 - t)
+        centroid_1 * hermite_1_derivative(t)
+        + centroid_2 * -hermite_1_derivative(1 - t)
+        + weight * normal_1 * hermite_2_derivative(t)
+        - weight * normal_2 * -hermite_2_derivative(1 - t)
     ).normalized()
 
 
@@ -232,24 +232,47 @@ def make_handle(mesh, face_1, vertex_1, face_2, vertex_2, num_segments, weight, 
     bmesh.ops.delete(mesh, geom=[face_2], context="FACES_ONLY")
 
 
-def make_random_handle(selected_object):
-    bpy_mesh = selected_object.data
-    mesh = bmesh.new()
-    mesh.from_mesh(bpy_mesh)
+def get_active_vertex(mesh):
+    for element in mesh.select_history[:][::-1]:
+        if isinstance(element, bmesh.types.BMVert):
+            return element
+    else:
+        return None
 
-    faces = mesh.faces[:]
-    face_1 = random.choice(faces)
-    remaining_faces = [face for face in faces if face is not face_1]
-    face_2 = random.choice(remaining_faces)
-    vertex_1 = random.choice(face_1.verts)
-    vertex_2 = random.choice(face_2.verts)
 
-    make_handle(
-        mesh, face_1, vertex_1, face_2, vertex_2, 10, 30.0
-    )
+class AddonState:
 
-    mesh.to_mesh(bpy_mesh)
-    mesh.free()
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.edit_mode_mesh = None
+        self.faces = None
+
+
+GLOBAL_ADDON_STATE = AddonState()
+
+
+class SelectFacesForHandle(bpy.types.Operator):
+    """Select two faces for a TopMod-style handle."""
+    bl_idname = "mesh.select_faces_for_handle"
+    bl_label = "Select Faces for Handle"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        edit_mode_mesh = bpy.context.object.data
+        mesh = bmesh.from_edit_mesh(edit_mode_mesh)
+        faces = [
+            element for element in mesh.select_history
+            if isinstance(element, bmesh.types.BMFace)
+        ]
+        if len(faces) != 2:
+            self.report({"WARNING"}, "Select exactly two faces")
+            return {"CANCELLED"}
+        GLOBAL_ADDON_STATE.edit_mode_mesh = edit_mode_mesh
+        GLOBAL_ADDON_STATE.faces = faces
+        return {"FINISHED"}
+
 
 
 class MakeHandle(bpy.types.Operator):
@@ -259,25 +282,72 @@ class MakeHandle(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
-        selected_object = bpy.context.object
-        if selected_object is None:
-            self.report({"WARNING"}, "No object selected")
+        edit_mode_mesh = bpy.context.object.data
+        mesh = bmesh.from_edit_mesh(edit_mode_mesh)
+        if edit_mode_mesh is not GLOBAL_ADDON_STATE.edit_mode_mesh:
+            self.report({"WARNING"}, "Run 'Select Faces for Handle' first")
             return {"CANCELLED"}
-        make_random_handle(selected_object)
+        vertices = [
+            element for element in mesh.select_history
+            if isinstance(element, bmesh.types.BMVert)
+        ]
+        if len(vertices) not in (1, 2):
+            self.report({"WARNING"}, "Select 1 or 2 vertices")
+            return {"CANCELLED"}
+        face_1, face_2 = GLOBAL_ADDON_STATE.faces
+        if len(vertices) == 1:
+            vertex = vertices[0]
+            if vertex not in face_1.verts and vertex not in face_2.verts:
+                self.report({"WARNING"}, "Vertex is not in either of the selected faces")
+                return {"CANCELLED"}
+            if vertex not in face_1.verts or vertex not in face_2.verts:
+                self.report({"WARNING"}, "One of the selected faces does not contain the vertex")
+                return {"CANCELLED"}
+            vertices = [vertex, vertex]
+
+        vertex_1, vertex_2 = vertices
+
+        if not (vertex_1 in face_1.verts or vertex_1 in face_2.verts):
+            self.report({"WARNING"}, "One of the selected vertices is not adjacent to any face")
+            return {"CANCELLED"}
+        if not (vertex_2 in face_1.verts or vertex_2 in face_2.verts):
+            self.report({"WARNING"}, "One of the selected vertices is not adjacent to any face")
+            return {"CANCELLED"}
+        if not (vertex_1 in face_1.verts or vertex_2 in face_1.verts):
+            self.report({"WARNING"}, "One of the selected faces is not adjacent to any vertex")
+            return {"CANCELLED"}
+        if not (vertex_1 in face_2.verts or vertex_2 in face_2.verts):
+            self.report({"WARNING"}, "One of the selected faces is not adjacent to any vertex")
+            return {"CANCELLED"}
+
+        if vertex_1 not in face_1.verts:
+            vertex_1, vertex_2 = vertex_2, vertex_1
+
+        make_handle(mesh, face_1, vertex_1, face_2, vertex_2, 10, 30.0)
+        bmesh.update_edit_mesh(edit_mode_mesh)
         return {"FINISHED"}
 
 
-def menu_func(self, context):
+def select_faces_for_handle_menu_func(self, context):
+    self.layout.operator(SelectFacesForHandle.bl_idname)
+
+
+def make_handle_menu_func(self, context):
     self.layout.operator(MakeHandle.bl_idname)
 
 
 def register():
+    bpy.utils.register_class(SelectFacesForHandle)
     bpy.utils.register_class(MakeHandle)
-    bpy.types.VIEW3D_MT_object.append(menu_func)
+    bpy.types.VIEW3D_MT_edit_mesh.append(select_faces_for_handle_menu_func)
+    bpy.types.VIEW3D_MT_edit_mesh.append(make_handle_menu_func)
 
 
 def unregister():
+    bpy.utils.unregister_class(SelectFacesForHandle)
     bpy.utils.unregister_class(MakeHandle)
+    bpy.types.VIEW3D_MT_edit_mesh.remove(select_faces_for_handle_menu_func)
+    bpy.types.VIEW3D_MT_edit_mesh.remove(make_handle_menu_func)
 
 
 def main():
