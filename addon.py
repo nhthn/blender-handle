@@ -169,8 +169,6 @@ def make_handle(mesh, face_1, vertex_1, face_2, vertex_2, num_segments, weight, 
     # coordinate system.
     points_1_polar = convert_polygon_to_polar(vertices_1, x_axis, y_axis)
     points_2_polar = convert_polygon_to_polar(vertices_2, x_axis, y_axis)
-    print(points_1_polar)
-    print(points_2_polar)
 
     # If the angle of the first point of polygon 1 is more than 180 degrees from the angle
     # of the angle of the first point of polygon 2, the handle will have an extra twist.
