@@ -27,6 +27,10 @@ def hermite_2_derivative(t):
     return 3 * t * t - 2 * 2 * t + 1
 
 
+def rotate_list(the_list, n):
+    return the_list[n:] + the_list[:n]
+
+
 def get_centroid(face):
     """Compute the centroid of a face."""
     result = mathutils.Vector()
@@ -66,6 +70,7 @@ def convert_polygon_to_polar(vertices, x_axis, y_axis):
         if angle < last_angle:
             angle += 2 * math.pi
         result.append((radius, angle))
+        last_angle = angle
     return result
 
 
@@ -111,6 +116,116 @@ def get_handle_normal(centroid_1, normal_1, centroid_2, normal_2, t, weight):
     ).normalized()
 
 
+def make_handle(mesh, face_1, vertex_1, face_2, vertex_2, num_segments, weight, twists=0):
+    if vertex_1 not in face_1.verts:
+        raise RuntimeError("Vertex 1 not in face 1")
+    if vertex_2 not in face_2.verts:
+        raise RuntimeError("Vertex 2 not in face 2")
+
+    normal_1 = face_1.normal
+    normal_2 = -face_2.normal
+
+    centroid_1 = get_centroid(face_1)
+    centroid_2 = get_centroid(face_2)
+
+    original_vertices_1 = face_1.verts[:]
+    shift_1 = original_vertices_1.index(vertex_1)
+    original_vertices_1 = rotate_list(original_vertices_1, shift_1)
+
+    original_vertices_2 = face_2.verts[:]
+    shift_2 = original_vertices_2.index(vertex_2)
+    original_vertices_2 = rotate_list(original_vertices_2, shift_2)
+    # Reverse the second polygon. Trust me, it looks weird if you don't do this.
+    original_vertices_2 = original_vertices_2[::-1]
+
+    # Translate the two polygons so their centroids are the origin.
+    points_1 = [vertex.co - centroid_1 for vertex in original_vertices_1]
+    points_2 = [vertex.co - centroid_2 for vertex in original_vertices_2]
+    if len(points_1) != len(points_2):
+        raise RuntimeError("Polygons must have same number of sides")
+
+    # Rotate the two polygons so their normals are the same vector. For some reason, that
+    # vector is the displacement from one centroid to the other; not clear to me why.
+    rotation_plane_normal = (centroid_2 - centroid_1).normalized()
+    vertices_1 = rotate_polygon_to_new_normal(points_1, normal_1, rotation_plane_normal)
+    vertices_2 = rotate_polygon_to_new_normal(points_2, normal_2, rotation_plane_normal)
+
+    # We set up a 2D coordinate system in the plane orthogonal to rotation_plane_normal.
+    # The exact choice isn't important, but they need to be orthogonal to each other and
+    # to rotation_plane_normal. We retrieve the X-axis from one of the edges and the
+    # Y-axis is produced with a cross product.
+    x_axis = (vertices_1[-1] - vertices_1[0]).normalized()
+    y_axis = rotation_plane_normal.cross(x_axis)
+
+    # Project the two 3D polygons onto the plane and convert them to polar form using the
+    # coordinate system.
+    points_1_polar = convert_polygon_to_polar(vertices_1, x_axis, y_axis)
+    points_2_polar = convert_polygon_to_polar(vertices_2, x_axis, y_axis)
+    print(points_1_polar)
+    print(points_2_polar)
+
+    # If the angle of the first point of polygon 1 is more than 180 degrees from the angle
+    # of the angle of the first point of polygon 2, the handle will have an extra twist.
+    # Subtracting 2pi from all angles in polygon 2 will untwist it.
+    if points_2_polar[0][1] - points_1_polar[0][1] > math.pi:
+        points_2_polar = [
+            (radius, angle - 2 * math.pi) for radius, angle in points_2_polar
+        ]
+    points_2_polar = [
+        (radius, angle + 2 * math.pi * twists) for radius, angle in points_2_polar
+    ]
+
+    # Set up a 2D list of vertices. Each item of handle_vertices corresponds to a ring of
+    # vertices forming a polygonal cross section of the handle. We will be creating new
+    # vertices for every ring except the first and last, where we reuse existing vertices
+    # from the two original faces.
+    handle_vertices = [original_vertices_1]
+
+    ts = [i / (num_segments - 1) for i in range(1, num_segments - 1)]
+    for t in ts:
+        # Use a cubic Hermite spline to get the centroid of the polygonal ring.
+        centroid = get_handle_centroid(
+            centroid_1, normal_1, centroid_2, normal_2, t, weight
+        )
+        # Use the derivative of that cubic Hermite spline to get the normal of the polygon.
+        normal = get_handle_normal(
+            centroid_1, normal_1, centroid_2, normal_2, t, weight
+        )
+        # Interpolate between the two 2D polar polygons and reconstruct a 3D polygon
+        # orthogonal to the computed normal and centered on the computed centroid.
+        polygon_polar = interpolate_polar_polygons(points_1_polar, points_2_polar, t)
+        polygon = convert_polar_to_polygon(polygon_polar, x_axis, y_axis)
+        polygon = rotate_polygon_to_new_normal(polygon, rotation_plane_normal, normal)
+        polygon = [point + centroid for point in polygon]
+
+        # Create vertices for each of the points.
+        segment = []
+        for point in polygon:
+            new_vertex = bmesh.ops.create_vert(mesh, co=point)["vert"][0]
+            segment.append(new_vertex)
+        handle_vertices.append(segment)
+
+    # Add the vertices from the second face.
+    handle_vertices.append(original_vertices_2)
+
+    # Connect the rings of vertices with quadrilaterals.
+    for i in range(len(handle_vertices) - 1):
+        segment_1 = handle_vertices[i]
+        segment_2 = handle_vertices[i + 1]
+        for j in range(len(segment_1)):
+            vertices = [
+                segment_1[j],
+                segment_1[(j + 1) % len(segment_1)],
+                segment_2[(j + 1) % len(segment_2)],
+                segment_2[j],
+            ]
+            bmesh.ops.contextual_create(mesh, geom=vertices)
+
+    # Delete the original faces.
+    bmesh.ops.delete(mesh, geom=[face_1], context="FACES_ONLY")
+    bmesh.ops.delete(mesh, geom=[face_2], context="FACES_ONLY")
+
+
 def main():
     bpy.ops.object.select_all(action="SELECT")
     bpy.ops.object.delete(use_global=False)
@@ -124,71 +239,15 @@ def main():
     faces = mesh.faces[:]
     face_1 = faces[0]
     face_2 = faces[1]
+    vertex_1 = faces[0].verts[0]
+    vertex_2 = faces[1].verts[3]
 
-    normal_1 = face_1.normal
-    normal_2 = -face_2.normal
-
-    centroid_1 = get_centroid(face_1)
-    centroid_2 = get_centroid(face_2)
-    points_1 = [vertex.co - centroid_1 for vertex in face_1.verts]
-    points_2 = [vertex.co - centroid_2 for vertex in face_2.verts]
-    points_2 = points_2[::-1]
-    if len(points_1) != len(points_2):
-        raise RuntimeError("Polygons must have same number of sides")
-    rotation_plane_normal = (centroid_2 - centroid_1).normalized()
-    vertices_1 = rotate_polygon_to_new_normal(points_1, normal_1, rotation_plane_normal)
-    vertices_2 = rotate_polygon_to_new_normal(points_2, normal_2, rotation_plane_normal)
-    x_axis = (vertices_1[-1] - vertices_1[0]).normalized()
-    y_axis = rotation_plane_normal.cross(x_axis)
-    points_1_polar = convert_polygon_to_polar(vertices_1, x_axis, y_axis)
-    points_2_polar = convert_polygon_to_polar(vertices_2, x_axis, y_axis)
-    if points_2_polar[0][1] - points_1_polar[0][1] > math.pi:
-        points_2_polar = [
-            (radius, angle - 2 * math.pi) for radius, angle in points_2_polar
-        ]
-
-    handle_vertices = [face_1.verts]
-
-    weight = 30
-    n = 10
-    ts = [i / (n - 1) for i in range(1, n - 1)]
-    for t in ts:
-        centroid = get_handle_centroid(
-            centroid_1, normal_1, centroid_2, normal_2, t, weight
-        )
-        normal = get_handle_normal(
-            centroid_1, normal_1, centroid_2, normal_2, t, weight
-        )
-        polygon_polar = interpolate_polar_polygons(points_1_polar, points_2_polar, t)
-        polygon = convert_polar_to_polygon(polygon_polar, x_axis, y_axis)
-        polygon = rotate_polygon_to_new_normal(polygon, rotation_plane_normal, normal)
-        polygon = [point + centroid for point in polygon]
-        segment = []
-        for point in polygon:
-            new_vertex = bmesh.ops.create_vert(mesh, co=point)["vert"][0]
-            segment.append(new_vertex)
-        handle_vertices.append(segment)
-
-    handle_vertices.append(face_2.verts[:][::-1])
-
-    for i in range(len(handle_vertices) - 1):
-        segment_1 = handle_vertices[i]
-        segment_2 = handle_vertices[i + 1]
-        for j in range(len(segment_1)):
-            vertices = [
-                segment_1[j],
-                segment_1[(j + 1) % len(segment_1)],
-                segment_2[(j + 1) % len(segment_2)],
-                segment_2[j],
-            ]
-            bmesh.ops.contextual_create(mesh, geom=vertices)
-
-    bmesh.ops.delete(mesh, geom=[face_1], context="FACES_ONLY")
-    bmesh.ops.delete(mesh, geom=[face_2], context="FACES_ONLY")
+    make_handle(
+        mesh, face_1, vertex_1, face_2, vertex_2, 10, 30.0
+    )
 
     mesh.to_mesh(bpy_mesh)
     mesh.free()
-
 
 
 if __name__ == "__main__":
