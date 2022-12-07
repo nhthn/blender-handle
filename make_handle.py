@@ -261,6 +261,7 @@ class SelectFacesForHandle(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
+        GLOBAL_ADDON_STATE.reset()
         edit_mode_mesh = bpy.context.object.data
         mesh = bmesh.from_edit_mesh(edit_mode_mesh)
         faces = [
