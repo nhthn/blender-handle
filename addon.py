@@ -1,10 +1,18 @@
 import math
+import random
 import sys
 import traceback
 
 import bmesh
-import bpy
 import mathutils
+import bpy
+
+
+bl_info = {
+    "name": "Make Handle",
+    "blender": (3, 3, 1),
+    "category": "Object",
+}
 
 
 def hermite_1(t):
@@ -97,10 +105,10 @@ def get_handle_centroid(centroid_1, normal_1, centroid_2, normal_2, t, weight):
     intermediate face parametrized by the variable 0 <= t <= 1. The weight parameter
     controls how much the handle sticks out."""
     return (
-        centroid_1 * hermite_1(t)
-        + centroid_2 * hermite_1(1 - t)
-        + weight * normal_1 * hermite_2(t)
-        - weight * normal_2 * hermite_2(1 - t)
+            centroid_1 * hermite_1(t)
+            + centroid_2 * hermite_1(1 - t)
+            + weight * normal_1 * hermite_2(t)
+            - weight * normal_2 * hermite_2(1 - t)
     )
 
 
@@ -109,10 +117,10 @@ def get_handle_normal(centroid_1, normal_1, centroid_2, normal_2, t, weight):
     centroid. This is accomplished by taking the derivative of get_handle_centroid
     and then normalizing the resulting 3D vector."""
     return (
-        centroid_1 * hermite_1_derivative(t)
-        + centroid_2 * -hermite_1_derivative(1 - t)
-        + weight * normal_1 * hermite_2_derivative(t)
-        - weight * normal_2 * -hermite_2_derivative(1 - t)
+            centroid_1 * hermite_1_derivative(t)
+            + centroid_2 * -hermite_1_derivative(1 - t)
+            + weight * normal_1 * hermite_2_derivative(t)
+            - weight * normal_2 * -hermite_2_derivative(1 - t)
     ).normalized()
 
 
@@ -226,21 +234,17 @@ def make_handle(mesh, face_1, vertex_1, face_2, vertex_2, num_segments, weight, 
     bmesh.ops.delete(mesh, geom=[face_2], context="FACES_ONLY")
 
 
-def main():
-    bpy.ops.object.select_all(action="SELECT")
-    bpy.ops.object.delete(use_global=False)
-
-    bpy.ops.mesh.primitive_cube_add()
-
-    bpy_mesh = bpy.context.object.data
+def make_random_handle(selected_object):
+    bpy_mesh = selected_object.data
     mesh = bmesh.new()
     mesh.from_mesh(bpy_mesh)
 
     faces = mesh.faces[:]
-    face_1 = faces[0]
-    face_2 = faces[1]
-    vertex_1 = faces[0].verts[0]
-    vertex_2 = faces[1].verts[3]
+    face_1 = random.choice(faces)
+    remaining_faces = [face for face in faces if face is not face_1]
+    face_2 = random.choice(remaining_faces)
+    vertex_1 = random.choice(face_1.verts)
+    vertex_2 = random.choice(face_2.verts)
 
     make_handle(
         mesh, face_1, vertex_1, face_2, vertex_2, 10, 30.0
@@ -250,9 +254,33 @@ def main():
     mesh.free()
 
 
+class MakeHandle(bpy.types.Operator):
+    """Create a TopMod-style handle connecting two faces."""
+    bl_idname = "mesh.make_handle"
+    bl_label = "Make Handle"
+    bl_options = {"REGISTER", "UNDO"}
+
+    def execute(self, context):
+        selected_object = bpy.context.object
+        if selected_object is None:
+            self.report({"WARNING"}, "No object selected")
+            return {"CANCELLED"}
+        make_random_handle(selected_object)
+        return {"FINISHED"}
+
+
+def menu_func(self, context):
+    self.layout.operator(MakeHandle.bl_idname)
+
+
+def register():
+    bpy.utils.register_class(MakeHandle)
+    bpy.types.VIEW3D_MT_object.append(menu_func)
+
+
+def unregister():
+    bpy.utils.unregister_class(MakeHandle)
+
+
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception:
-        traceback.print_exc()
-        sys.exit(1)
+    register()
