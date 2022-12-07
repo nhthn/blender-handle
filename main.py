@@ -181,7 +181,7 @@ def make_handle(mesh, face_1, vertex_1, face_2, vertex_2, num_segments, weight, 
     # from the two original faces.
     handle_vertices = [original_vertices_1]
 
-    ts = [i / (num_segments - 1) for i in range(1, num_segments - 1)]
+    ts = [i / num_segments for i in range(1, num_segments)]
     for t in ts:
         # Use a cubic Hermite spline to get the centroid of the polygonal ring.
         centroid = get_handle_centroid(
