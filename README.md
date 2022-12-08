@@ -18,14 +18,10 @@ Tested with Blender 3.3.
 To make a handle:
 
 - Select a mesh and enter edit mode.
-- Enter face selection mode (near the upper left of the 3D view).
-- Select two faces (use Shift-click to select multiple).
-- Go to Edit -> Menu Search, or press F3. Search for "Select Face for Handle" and press Enter.
-- Enter vertex selection mode.
-- Select two vertices, one adjacent to each face, or select one vertex adjacent to both faces.
+- Shift-click face selection and vertex selection modes near the upper left of the 3D view.
+- Select two vertices (use Shift-click to select the second one). You may also select just one vertex if the faces share that vertex.
+- Shift-click to select the two faces adjacent to those vertices.
 - Go to Edit -> Menu Search, search for "Make Handle," and press Enter.
-
-This is pretty awkward. The workflow will be improved in the future.
 
 ### Limitations
 

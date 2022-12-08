@@ -232,50 +232,6 @@ def make_handle(mesh, face_1, vertex_1, face_2, vertex_2, num_segments, weight, 
     bmesh.ops.delete(mesh, geom=[face_2], context="FACES_ONLY")
 
 
-def get_active_vertex(mesh):
-    for element in mesh.select_history[:][::-1]:
-        if isinstance(element, bmesh.types.BMVert):
-            return element
-    else:
-        return None
-
-
-class AddonState:
-
-    def __init__(self):
-        self.edit_mode_mesh = None
-        self.faces = None
-
-    def reset(self):
-        self.edit_mode_mesh = None
-        self.faces = None
-
-
-GLOBAL_ADDON_STATE = AddonState()
-
-
-class SelectFacesForHandle(bpy.types.Operator):
-    """Select two faces for a TopMod-style handle."""
-    bl_idname = "mesh.select_faces_for_handle"
-    bl_label = "Select Faces for Handle"
-    bl_options = {"REGISTER", "UNDO"}
-
-    def execute(self, context):
-        GLOBAL_ADDON_STATE.reset()
-        edit_mode_mesh = bpy.context.object.data
-        mesh = bmesh.from_edit_mesh(edit_mode_mesh)
-        faces = [
-            element for element in mesh.select_history
-            if isinstance(element, bmesh.types.BMFace)
-        ]
-        if len(faces) != 2:
-            self.report({"WARNING"}, "Select exactly two faces")
-            return {"CANCELLED"}
-        GLOBAL_ADDON_STATE.edit_mode_mesh = edit_mode_mesh
-        GLOBAL_ADDON_STATE.faces = faces
-        return {"FINISHED"}
-
-
 class MakeHandle(bpy.types.Operator):
     """Create a TopMod-style handle connecting two faces."""
     bl_idname = "mesh.make_handle"
@@ -285,17 +241,23 @@ class MakeHandle(bpy.types.Operator):
     def execute(self, context):
         edit_mode_mesh = bpy.context.object.data
         mesh = bmesh.from_edit_mesh(edit_mode_mesh)
-        if edit_mode_mesh is not GLOBAL_ADDON_STATE.edit_mode_mesh:
-            self.report({"WARNING"}, "Run 'Select Faces for Handle' first")
-            return {"CANCELLED"}
+        faces = [
+            element for element in mesh.select_history
+            if isinstance(element, bmesh.types.BMFace)
+        ]
         vertices = [
             element for element in mesh.select_history
             if isinstance(element, bmesh.types.BMVert)
         ]
+
+        if len(faces) != 2:
+            self.report({"WARNING"}, "Select exactly two faces")
+            return {"CANCELLED"}
         if len(vertices) not in (1, 2):
             self.report({"WARNING"}, "Select 1 or 2 vertices")
             return {"CANCELLED"}
-        face_1, face_2 = GLOBAL_ADDON_STATE.faces
+
+        face_1, face_2 = faces
         if len(vertices) == 1:
             vertex = vertices[0]
             if vertex not in face_1.verts and vertex not in face_2.verts:
@@ -326,12 +288,7 @@ class MakeHandle(bpy.types.Operator):
 
         make_handle(mesh, face_1, vertex_1, face_2, vertex_2, 10, 30.0)
         bmesh.update_edit_mesh(edit_mode_mesh)
-        GLOBAL_ADDON_STATE.reset()
         return {"FINISHED"}
-
-
-def select_faces_for_handle_menu_func(self, context):
-    self.layout.operator(SelectFacesForHandle.bl_idname)
 
 
 def make_handle_menu_func(self, context):
@@ -339,16 +296,12 @@ def make_handle_menu_func(self, context):
 
 
 def register():
-    bpy.utils.register_class(SelectFacesForHandle)
     bpy.utils.register_class(MakeHandle)
-    bpy.types.VIEW3D_MT_edit_mesh.append(select_faces_for_handle_menu_func)
     bpy.types.VIEW3D_MT_edit_mesh.append(make_handle_menu_func)
 
 
 def unregister():
-    bpy.utils.unregister_class(SelectFacesForHandle)
     bpy.utils.unregister_class(MakeHandle)
-    bpy.types.VIEW3D_MT_edit_mesh.remove(select_faces_for_handle_menu_func)
     bpy.types.VIEW3D_MT_edit_mesh.remove(make_handle_menu_func)
 
 
