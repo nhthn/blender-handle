@@ -124,10 +124,13 @@ def get_handle_normal(centroid_1, normal_1, centroid_2, normal_2, t, weight):
     ).normalized()
 
 
-def connect_vertices_with_prism(mesh, vertices_1, vertices_2):
+def connect_vertices_with_prism(mesh, vertices_1, vertices_2, flip=False):
     # Ensure vertices_1 has more vertices than vertices_2.
     if len(vertices_1) < len(vertices_2):
-        connect_vertices_with_prism(mesh, vertices_2, vertices_1)
+        # Swapping the two vertex sets has the effect of turning the ring of faces
+        # inside out, and to compensate for this we reverse the order of vertices.
+        # This prevents flipped normals.
+        connect_vertices_with_prism(mesh, vertices_2, vertices_1, flip=not flip)
         return
     # Connect with quadrilaterals.
     for i in range(len(vertices_2)):
@@ -137,7 +140,9 @@ def connect_vertices_with_prism(mesh, vertices_1, vertices_2):
             vertices_2[(i + 1) % len(vertices_2)],
             vertices_2[i],
         ]
-        bmesh.ops.contextual_create(mesh, geom=vertices)
+        if flip:
+            vertices = vertices[::-1]
+        mesh.faces.new(vertices)
     # Connect with triangles.
     for i in range(len(vertices_2), len(vertices_1)):
         vertices = [
@@ -145,7 +150,9 @@ def connect_vertices_with_prism(mesh, vertices_1, vertices_2):
             vertices_1[(i + 1) % len(vertices_1)],
             vertices_2[0],
         ]
-        bmesh.ops.contextual_create(mesh, geom=vertices)
+        if flip:
+            vertices = vertices[::-1]
+        mesh.faces.new(vertices)
 
 
 def make_handle(mesh, face_1, vertex_1, face_2, vertex_2, num_segments, weight, twists=0):
@@ -242,7 +249,7 @@ def make_handle(mesh, face_1, vertex_1, face_2, vertex_2, num_segments, weight, 
         # Create vertices for each of the points.
         segment = []
         for point in polygon:
-            new_vertex = bmesh.ops.create_vert(mesh, co=point)["vert"][0]
+            new_vertex = mesh.verts.new(point)
             segment.append(new_vertex)
         rings.append(segment)
 
@@ -254,8 +261,9 @@ def make_handle(mesh, face_1, vertex_1, face_2, vertex_2, num_segments, weight, 
         connect_vertices_with_prism(mesh, rings[i], rings[i + 1])
 
     # Delete the original faces.
-    bmesh.ops.delete(mesh, geom=[face_1], context="FACES_ONLY")
-    bmesh.ops.delete(mesh, geom=[face_2], context="FACES_ONLY")
+    bmesh.ops.delete(mesh, geom=[face_1, face_2], context="FACES_ONLY")
+
+    mesh.normal_update()
 
 
 class MakeHandle(bpy.types.Operator):
@@ -364,6 +372,8 @@ def main():
     mesh.faces.new([vertices[0], vertices[2], vertices[3]])
 
     mesh.normal_update()
+
+    face_1, face_2 = face_2, face_1
 
     vertex_1 = face_1.verts[0]
     vertex_2 = face_2.verts[0]
