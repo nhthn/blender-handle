@@ -131,6 +131,7 @@ def make_handle(mesh, face_1, vertex_1, face_2, vertex_2, num_segments, weight, 
         raise RuntimeError("Vertex 2 not in face 2")
 
     normal_1 = face_1.normal
+    #
     normal_2 = -face_2.normal
 
     centroid_1 = get_centroid(face_1)
@@ -141,7 +142,6 @@ def make_handle(mesh, face_1, vertex_1, face_2, vertex_2, num_segments, weight, 
     original_vertices_1 = rotate_list(original_vertices_1, shift_1)
 
     original_vertices_2 = face_2.verts[:]
-    # Reverse the second polygon. Trust me, it looks weird if you don't do this.
     original_vertices_2 = original_vertices_2[::-1]
     shift_2 = original_vertices_2.index(vertex_2)
     original_vertices_2 = rotate_list(original_vertices_2, shift_2)
@@ -238,6 +238,10 @@ class MakeHandle(bpy.types.Operator):
     bl_label = "Make Handle"
     bl_options = {"REGISTER", "UNDO"}
 
+    segments: bpy.props.IntProperty(name="Segments", default=10, min=1, soft_max=1000)
+    weight: bpy.props.FloatProperty(name="Weight", default=10.0, min=0.0, soft_max=1000.0)
+    twists: bpy.props.IntProperty(name="Twists", default=0, soft_min=-10, soft_max=10)
+
     def execute(self, context):
         edit_mode_mesh = bpy.context.object.data
         mesh = bmesh.from_edit_mesh(edit_mode_mesh)
@@ -283,10 +287,19 @@ class MakeHandle(bpy.types.Operator):
             self.report({"WARNING"}, "One of the selected faces is not adjacent to any vertex")
             return {"CANCELLED"}
 
-        if vertex_1 not in face_1.verts:
+        if vertex_1 not in face_1.verts or vertex_2 not in face_2.verts:
             vertex_1, vertex_2 = vertex_2, vertex_1
 
-        make_handle(mesh, face_1, vertex_1, face_2, vertex_2, 10, 30.0)
+        make_handle(
+            mesh,
+            face_1,
+            vertex_1,
+            face_2,
+            vertex_2,
+            self.segments,
+            self.weight,
+            self.twists,
+        )
         bmesh.update_edit_mesh(edit_mode_mesh)
         return {"FINISHED"}
 
