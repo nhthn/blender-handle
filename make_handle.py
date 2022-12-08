@@ -124,6 +124,30 @@ def get_handle_normal(centroid_1, normal_1, centroid_2, normal_2, t, weight):
     ).normalized()
 
 
+def connect_vertices_with_prism(mesh, vertices_1, vertices_2):
+    # Ensure vertices_1 has more vertices than vertices_2.
+    if len(vertices_1) < len(vertices_2):
+        connect_vertices_with_prism(mesh, vertices_2, vertices_1)
+        return
+    # Connect with quadrilaterals.
+    for i in range(len(vertices_2)):
+        vertices = [
+            vertices_1[i],
+            vertices_1[(i + 1) % len(vertices_1)],
+            vertices_2[(i + 1) % len(vertices_2)],
+            vertices_2[i],
+        ]
+        bmesh.ops.contextual_create(mesh, geom=vertices)
+    # Connect with triangles.
+    for i in range(len(vertices_2), len(vertices_1)):
+        vertices = [
+            vertices_1[i],
+            vertices_1[(i + 1) % len(vertices_1)],
+            vertices_2[0],
+        ]
+        bmesh.ops.contextual_create(mesh, geom=vertices)
+
+
 def make_handle(mesh, face_1, vertex_1, face_2, vertex_2, num_segments, weight, twists=0):
     if vertex_1 not in face_1.verts:
         raise RuntimeError("Vertex 1 not in face 1")
@@ -131,7 +155,6 @@ def make_handle(mesh, face_1, vertex_1, face_2, vertex_2, num_segments, weight, 
         raise RuntimeError("Vertex 2 not in face 2")
 
     normal_1 = face_1.normal
-    #
     normal_2 = -face_2.normal
 
     centroid_1 = get_centroid(face_1)
@@ -149,8 +172,12 @@ def make_handle(mesh, face_1, vertex_1, face_2, vertex_2, num_segments, weight, 
     # Translate the two polygons so their centroids are the origin.
     points_1 = [vertex.co - centroid_1 for vertex in original_vertices_1]
     points_2 = [vertex.co - centroid_2 for vertex in original_vertices_2]
-    if len(points_1) != len(points_2):
-        raise RuntimeError("Polygons must have same number of sides")
+
+    # Extend the shorter of the two point lists with a duplicated point.
+    if len(points_1) > len(points_2):
+        points_2.extend([points_2[0]] * (len(points_1) - len(points_2)))
+    elif len(points_2) > len(points_1):
+        points_1.extend([points_1[0]] * (len(points_2) - len(points_1)))
 
     # Rotate the two polygons so their normals are the same vector. For some reason, that
     # vector is the displacement from one centroid to the other; not clear to me why.
@@ -162,7 +189,15 @@ def make_handle(mesh, face_1, vertex_1, face_2, vertex_2, num_segments, weight, 
     # The exact choice isn't important, but they need to be orthogonal to each other and
     # to rotation_plane_normal. We retrieve the X-axis from one of the edges and the
     # Y-axis is produced with a cross product.
-    x_axis = (vertices_1[-1] - vertices_1[0]).normalized()
+    # We ensure that the edge that we get the X-axis from is nondegenerate, i.e. its
+    # length is not close to zero.
+    for i in range(len(vertices_1)):
+        displacement = vertices_1[(i - 1) % len(vertices_1)] - vertices_1[i]
+        if displacement.length >= 1e-10:
+            x_axis = displacement.normalized()
+            break
+    else:
+        raise RuntimeError("All the vertices in one of the faces are bunched together")
     y_axis = rotation_plane_normal.cross(x_axis)
 
     # Project the two 3D polygons onto the plane and convert them to polar form using the
@@ -181,11 +216,11 @@ def make_handle(mesh, face_1, vertex_1, face_2, vertex_2, num_segments, weight, 
         (radius, angle + 2 * math.pi * twists) for radius, angle in points_2_polar
     ]
 
-    # Set up a 2D list of vertices. Each item of handle_vertices corresponds to a ring of
-    # vertices forming a polygonal cross section of the handle. We will be creating new
-    # vertices for every ring except the first and last, where we reuse existing vertices
-    # from the two original faces.
-    handle_vertices = [original_vertices_1]
+    # Set up a 2D list of vertices. Each item of rings corresponds to a ring of vertices
+    # forming a polygonal cross section of the handle. We will be creating new vertices
+    # for every ring except the first and last, where we reuse existing vertices from the
+    # two original faces.
+    rings = [original_vertices_1]
 
     ts = [i / num_segments for i in range(1, num_segments)]
     for t in ts:
@@ -209,23 +244,14 @@ def make_handle(mesh, face_1, vertex_1, face_2, vertex_2, num_segments, weight, 
         for point in polygon:
             new_vertex = bmesh.ops.create_vert(mesh, co=point)["vert"][0]
             segment.append(new_vertex)
-        handle_vertices.append(segment)
+        rings.append(segment)
 
     # Add the vertices from the second face.
-    handle_vertices.append(original_vertices_2)
+    rings.append(original_vertices_2)
 
     # Connect the rings of vertices with quadrilaterals.
-    for i in range(len(handle_vertices) - 1):
-        segment_1 = handle_vertices[i]
-        segment_2 = handle_vertices[i + 1]
-        for j in range(len(segment_1)):
-            vertices = [
-                segment_1[j],
-                segment_1[(j + 1) % len(segment_1)],
-                segment_2[(j + 1) % len(segment_2)],
-                segment_2[j],
-            ]
-            bmesh.ops.contextual_create(mesh, geom=vertices)
+    for i in range(len(rings) - 1):
+        connect_vertices_with_prism(mesh, rings[i], rings[i + 1])
 
     # Delete the original faces.
     bmesh.ops.delete(mesh, geom=[face_1], context="FACES_ONLY")
@@ -239,7 +265,7 @@ class MakeHandle(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     segments: bpy.props.IntProperty(name="Segments", default=10, min=1, soft_max=1000)
-    weight: bpy.props.FloatProperty(name="Weight", default=10.0, min=0.0, soft_max=1000.0)
+    weight: bpy.props.FloatProperty(name="Weight", default=10.0, soft_min=-1000.0, soft_max=1000.0)
     twists: bpy.props.IntProperty(name="Twists", default=0, soft_min=-10, soft_max=10)
 
     def execute(self, context):
@@ -327,12 +353,20 @@ def main():
     bpy_mesh = bpy.context.object.data
     mesh = bmesh.new()
     mesh.from_mesh(bpy_mesh)
+    mesh.faces.ensure_lookup_table()
 
-    faces = mesh.faces[:]
-    face_1 = faces[0]
-    face_2 = faces[1]
-    vertex_1 = faces[0].verts[0]
-    vertex_2 = faces[1].verts[2]
+    face_to_remove = mesh.faces[0]
+    face_1 = mesh.faces[1]
+    vertices = face_to_remove.verts[:]
+    bmesh.ops.delete(mesh, geom=[face_to_remove], context="FACES_ONLY")
+
+    face_2 = mesh.faces.new([vertices[0], vertices[1], vertices[2]])
+    mesh.faces.new([vertices[0], vertices[2], vertices[3]])
+
+    mesh.normal_update()
+
+    vertex_1 = face_1.verts[0]
+    vertex_2 = face_2.verts[0]
 
     make_handle(
         mesh, face_1, vertex_1, face_2, vertex_2, 10, 30.0
