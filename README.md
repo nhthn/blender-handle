@@ -27,11 +27,9 @@ To make a handle:
   - **Twists:** number of additional 360-degree polygonal twists added. Negative values will twist in the opposite direction.
 - Click away from the panel to confirm.
 
+There is no requirement that the faces are identical, or even have the same number of sides. The two polygons are converted to polar coordinates in their respective planes, which are then linearly interpolated. If the faces have different vertex counts, the addon will treat the smaller polygon as having several coincident vertices bunched up.
+
 If both vertices are adjacent to both faces, then the choice of which vertex corresponds to which face may be ambiguous. In such cases, the order of selection resolves the ambiguity, with the first selected face matching the first selected vertex.
-
-## Limitations
-
-The faces currently must have the same number of sides.
 
 ## License
 
