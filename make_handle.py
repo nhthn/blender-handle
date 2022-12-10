@@ -1,5 +1,4 @@
 import math
-import random
 import sys
 import traceback
 
@@ -100,27 +99,27 @@ def interpolate_polar_polygons(polar_polygon_1, polar_polygon_2, t):
     return result
 
 
-def get_handle_centroid(centroid_1, normal_1, centroid_2, normal_2, t, weight):
+def get_handle_centroid(centroid_1, normal_1, centroid_2, normal_2, t, weight_1, weight_2):
     """Given the centroids and normals of two faces, compute the centroid of an
     intermediate face parametrized by the variable 0 <= t <= 1. The weight parameter
     controls how much the handle sticks out."""
     return (
         centroid_1 * hermite_1(t)
         + centroid_2 * hermite_1(1 - t)
-        + weight * normal_1 * hermite_2(t)
-        - weight * normal_2 * hermite_2(1 - t)
+        + weight_1 * normal_1 * hermite_2(t)
+        - weight_2 * normal_2 * hermite_2(1 - t)
     )
 
 
-def get_handle_normal(centroid_1, normal_1, centroid_2, normal_2, t, weight):
+def get_handle_normal(centroid_1, normal_1, centroid_2, normal_2, t, weight_1, weight_2):
     """Like get_handle_centroid, but compute the normal of the face instead of the
     centroid. This is accomplished by taking the derivative of get_handle_centroid
     and then normalizing the resulting 3D vector."""
     return (
         centroid_1 * hermite_1_derivative(t)
         + centroid_2 * -hermite_1_derivative(1 - t)
-        + weight * normal_1 * hermite_2_derivative(t)
-        - weight * normal_2 * -hermite_2_derivative(1 - t)
+        + weight_1 * normal_1 * hermite_2_derivative(t)
+        - weight_2 * normal_2 * -hermite_2_derivative(1 - t)
     ).normalized()
 
 
@@ -130,8 +129,8 @@ def connect_vertices_with_prism(mesh, vertices_1, vertices_2, flip=False):
         # Swapping the two vertex sets has the effect of turning the ring of faces
         # inside out, and to compensate for this we reverse the order of vertices.
         # This prevents flipped normals.
-        connect_vertices_with_prism(mesh, vertices_2, vertices_1, flip=not flip)
-        return
+        return connect_vertices_with_prism(mesh, vertices_2, vertices_1, flip=not flip)
+    result = []
     # Connect with quadrilaterals.
     for i in range(len(vertices_2)):
         vertices = [
@@ -142,7 +141,8 @@ def connect_vertices_with_prism(mesh, vertices_1, vertices_2, flip=False):
         ]
         if flip:
             vertices = vertices[::-1]
-        mesh.faces.new(vertices)
+        face = mesh.faces.new(vertices)
+        result.append(face)
     # Connect with triangles.
     for i in range(len(vertices_2), len(vertices_1)):
         vertices = [
@@ -152,10 +152,12 @@ def connect_vertices_with_prism(mesh, vertices_1, vertices_2, flip=False):
         ]
         if flip:
             vertices = vertices[::-1]
-        mesh.faces.new(vertices)
+        face = mesh.faces.new(vertices)
+        result.append(face)
+    return result
 
 
-def make_handle(mesh, face_1, vertex_1, face_2, vertex_2, num_segments, weight, twists=0):
+def make_handle(mesh, face_1, vertex_1, face_2, vertex_2, num_segments, weight_1, weight_2, twists=0):
     if vertex_1 not in face_1.verts:
         raise RuntimeError("Vertex 1 not in face 1")
     if vertex_2 not in face_2.verts:
@@ -233,11 +235,11 @@ def make_handle(mesh, face_1, vertex_1, face_2, vertex_2, num_segments, weight, 
     for t in ts:
         # Use a cubic Hermite spline to get the centroid of the polygonal ring.
         centroid = get_handle_centroid(
-            centroid_1, normal_1, centroid_2, normal_2, t, weight
+            centroid_1, normal_1, centroid_2, normal_2, t, weight_1, weight_2
         )
         # Use the derivative of that cubic Hermite spline to get the normal of the polygon.
         normal = get_handle_normal(
-            centroid_1, normal_1, centroid_2, normal_2, t, weight
+            centroid_1, normal_1, centroid_2, normal_2, t, weight_1, weight_2
         )
         # Interpolate between the two 2D polar polygons and reconstruct a 3D polygon
         # orthogonal to the computed normal and centered on the computed centroid.
@@ -256,14 +258,18 @@ def make_handle(mesh, face_1, vertex_1, face_2, vertex_2, num_segments, weight, 
     # Add the vertices from the second face.
     rings.append(original_vertices_2)
 
+    faces = []
     # Connect the rings of vertices with quadrilaterals.
     for i in range(len(rings) - 1):
-        connect_vertices_with_prism(mesh, rings[i], rings[i + 1])
+        ring_faces = connect_vertices_with_prism(mesh, rings[i], rings[i + 1])
+        faces.append(ring_faces)
 
     # Delete the original faces.
     bmesh.ops.delete(mesh, geom=[face_1, face_2], context="FACES_ONLY")
 
     mesh.normal_update()
+
+    return faces
 
 
 class MakeHandle(bpy.types.Operator):
@@ -273,7 +279,9 @@ class MakeHandle(bpy.types.Operator):
     bl_options = {"REGISTER", "UNDO"}
 
     segments: bpy.props.IntProperty(name="Segments", default=10, min=1, soft_max=1000)
-    weight: bpy.props.FloatProperty(name="Weight", default=10.0, soft_min=-1000.0, soft_max=1000.0)
+    weight_1: bpy.props.FloatProperty(name="Weight 1", default=10.0, soft_min=-1000.0, soft_max=1000.0)
+    symmetric_weights: bpy.props.BoolProperty(name="Symmetric Weights", default=True)
+    weight_2: bpy.props.FloatProperty(name="Weight 2", default=10.0, soft_min=-1000.0, soft_max=1000.0)
     twists: bpy.props.IntProperty(name="Twists", default=0, soft_min=-10, soft_max=10)
 
     def execute(self, context):
@@ -331,7 +339,8 @@ class MakeHandle(bpy.types.Operator):
             face_2,
             vertex_2,
             self.segments,
-            self.weight,
+            self.weight_1,
+            self.weight_1 if self.symmetric_weights else self.weight_2,
             self.twists,
         )
         bmesh.update_edit_mesh(edit_mode_mesh)
@@ -363,24 +372,16 @@ def main():
     mesh.from_mesh(bpy_mesh)
     mesh.faces.ensure_lookup_table()
 
-    face_to_remove = mesh.faces[0]
-    face_1 = mesh.faces[1]
-    vertices = face_to_remove.verts[:]
-    bmesh.ops.delete(mesh, geom=[face_to_remove], context="FACES_ONLY")
+    original_faces = mesh.faces[:]
 
-    face_2 = mesh.faces.new([vertices[0], vertices[1], vertices[2]])
-    mesh.faces.new([vertices[0], vertices[2], vertices[3]])
-
-    mesh.normal_update()
-
-    face_1, face_2 = face_2, face_1
-
-    vertex_1 = face_1.verts[0]
-    vertex_2 = face_2.verts[0]
-
-    make_handle(
-        mesh, face_1, vertex_1, face_2, vertex_2, 10, 30.0
-    )
+    for i, j in [(1, 0), (4, 2), (5, 3)]:
+        face_1 = original_faces[i]
+        face_2 = original_faces[j]
+        vertex_1 = face_1.verts[0]
+        vertex_2 = face_2.verts[0]
+        new_faces = make_handle(
+            mesh, face_1, vertex_1, face_2, vertex_2, 20, 30.0
+        )
 
     mesh.to_mesh(bpy_mesh)
     mesh.free()

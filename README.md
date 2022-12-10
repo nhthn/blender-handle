@@ -18,12 +18,15 @@ To make a handle:
 
 - Select a mesh and enter edit mode.
 - Enable face selection and vertex selection modes near the upper left of the 3D view. Use Shift+click to combine the modes.
+- Make sure nothing is selected.
 - Select two vertices. You may also select just one vertex if the faces share that vertex.
 - Select two faces, one adjacent to each of those vertices. Make sure not to click on any vertices, or you'll have to start over. (It may look like Blender clobbers your vertex selection, but it actually does remember which vertices you selected originally.)
 - Go to Edit -> Menu Search, search for "Make Handle," and press Enter.
 - Open up the panel in the bottom left and adjust the following parameters to taste:
   - **Segments:** number of segments in the handle.
-  - **Weight:** controls how much the handle sticks out. A weight of 0 will be a linear handle.
+  - **Weight 1:** controls how much the handle sticks out for the first selected face.
+  - **Symmetric Weights:** if checked, Weight 2 is overriden to be equal to Weight 1.
+  - **Weight 2:** controls how much the handle sticks out for the second selected face.
   - **Twists:** number of additional 360-degree polygonal twists added. Negative values will twist in the opposite direction.
 - Click away from the panel to confirm.
 
