@@ -1,6 +1,6 @@
 # Make Handle (Blender addon port of a TopMod feture)
 
-This is a Blender addon that ports the "Connect Faces" feature from [TopMod](http://people.tamu.edu/~ergun/research/topology/download.html), a research 3D modeling program. Given two faces and vertices adjacent to those faces, it will create a loopy segmented "handle" that connects the faces together, possibly with twists.
+This is a Blender addon that ports the "Add Handle" feature from [TopMod](http://people.tamu.edu/~ergun/research/topology/download.html), a research 3D modeling program. Given two faces and vertices adjacent to those faces, it will create a loopy segmented "handle" that connects the faces together, possibly with twists.
 
 ## Installation
 
